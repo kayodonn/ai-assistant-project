@@ -30,3 +30,92 @@
 - **Procedural Structure**: The entire file is procedural with top-level functions and globals, lacking classes. This hurts scalability as adding features requires modifying the global namespace, and maintainability suffers from no encapsulation (functions can access any global, leading to unintended side effects).
 - **Hard-Coded Sample Data**: AVAILABLE_COURSE_KEYS and SAMPLE_ENROLLMENTS are hard-coded lists used for seeding. This reduces maintainability (data changes require code edits) and scalability (can't dynamically load data from external sources without refactoring).
 - **Direct Database Calls in Service Logic**: Functions like enroll_with_key() directly call database functions, mixing layers. This makes it hard to mock databases for testing, hurting maintainability, and scalability (can't easily switch databases or add caching without changing service code).
+
+
+What matched my thinking?
+Some of the locations/layers for the methods matched my thinking. I noticed that some things would need to be moved, which the AI also pointed out.
+What changed my thinking?
+The AI suggested splitting up many of the mixed methods into different methods, which I initially wasn't thinking much about. But I see that this is what will be most effective and make the layers more usuable.
+What still needs clarification?
+Some suggestions were included about changing the hard coding done and structure of some methods. It's unclear whether this should stay or go because I understand some of the hard coding might just be included because of the nature of the assignment.
+
+
+
+
+
+### Backend Refactor Plan: From Procedural to Object-Oriented, Layered Design
+
+Based on the structural analysis, this plan outlines a transition from the current procedural code to an object-oriented (OO) design with clear separation of concerns across layers. The goal is to improve maintainability and scalability by isolating database operations, business logic, and configuration. We'll introduce classes to encapsulate behavior, eliminate global state where possible, and ensure each layer has a single responsibility.
+
+#### Key Principles Guiding the Refactor
+- **Layer Separation**:
+  - **Database Layer**: Handles all SQLite interactions (connections, queries, inserts, updates). Focuses purely on data persistence without business logic. Methods here should be low-level, returning raw rows or performing direct CRUD operations. No validation, filtering, or decision-making beyond basic SQL constraints.
+  - **Service Layer**: Contains business logic, including enrollment-key validation, status filtering (e.g., "enrolled" vs. "unenrolled"), summary calculations, and orchestration of database calls. This layer interprets data for "dashboard meaning" (e.g., what enrollments to show to a user) and handles high-level operations like enrollment workflows.
+  - **Config/Constants Layer**: Centralized, immutable configuration for paths, statuses, and sample data. This avoids global constants and allows for environment-specific overrides (e.g., different DB paths for testing).
+- **OO Design**: Group related methods into classes (e.g., `EnrollmentDatabase` for data access, `EnrollmentService` for business rules). Use dependency injection to pass database instances to services, reducing tight coupling.
+- **Addressing Structural Issues**:
+  - **Global Constants and State**: Move all globals (e.g., `DB_PATH`, `CURRENT_STUDENT`, `AVAILABLE_COURSE_KEYS`) to a `Config` class or module. This makes them injectable/configurable, improving testability and scalability (e.g., mock configs for different environments).
+  - **Database Code Making Service Decisions**: Remove validation and business logic from database methods. For example, `get_course_by_key` should only query; validation moves to service. This clarifies responsibilities and allows independent testing/unit mocking of layers.
+  - **Direct Database Calls in Service Logic**: Services will call database methods via injected instances, not directly. This enables mocking for tests, easier database switching (e.g., from SQLite to PostgreSQL), and potential caching layers.
+  - **Mixed Concerns**: Split "mixed" methods (e.g., `get_available_course_keys`) into pure database queries and service transformations. For instance, a database method fetches raw course data, and a service method formats it for "dashboard" use.
+  - **Hard-Coding**: Retain hard-coded sample data (e.g., `AVAILABLE_COURSE_KEYS`) as-is for this assignment's seeding purposes, but encapsulate it in the config layer. If scalability requires dynamic loading later, it can be refactored without affecting other layers.
+- **Order of Refactoring**: Follow dependencies—start with config/constants, then database, then service. This ensures lower layers are stable before building higher ones.
+- **No UI Focus**: This plan ignores UI concerns, focusing solely on backend layers.
+
+#### Proposed Layered Architecture
+- **Config Layer**: A simple class or module for constants and sample data.
+- **Database Layer**: `EnrollmentDatabase` class with methods for raw data access.
+- **Service Layer**: `EnrollmentService` class with business logic, injecting `EnrollmentDatabase`.
+- **No Mixed Layer**: Eliminate "mixed" by splitting; all methods belong clearly to one layer.
+- **Testing/Runner**: Keep `main()` as a simple test runner, but make it instantiate classes instead of calling globals.
+
+#### Detailed Method/Constant Mapping and Refactor Order
+Methods/constants are grouped by layer. For each, specify:
+- **Current Issues**: Ties to structural problems.
+- **Refactor Action**: How to move/split it, including order (e.g., "after config is set up").
+- **New Location**: Class and method name.
+- **Dependencies**: What must be done first.
+
+1. **Config Layer (First: Establish foundations to eliminate globals)**
+   - **DB_PATH**: Current Issues: Global, hard-coded path hurts scalability. Refactor Action: Move to `Config` class as a property; make injectable for testing. Order: First, as everything depends on paths. New Location: `Config.db_path`.
+   - **SNAPSHOT_PATH**: Current Issues: Global path. Refactor Action: Same as DB_PATH. Order: With DB_PATH. New Location: `Config.snapshot_path`.
+   - **CURRENT_STUDENT**: Current Issues: Global user state mixes service with data. Refactor Action: Move to `Config` as sample data; services can accept user_id/email as parameters instead of reading globals. Order: After paths. New Location: `Config.current_student`.
+   - **STATUS_ENROLLED/STATUS_UNENROLLED**: Current Issues: Global constants. Refactor Action: Move to `Config` as class constants. Order: With other constants. New Location: `Config.STATUS_ENROLLED`, etc.
+   - **AVAILABLE_COURSE_KEYS**: Current Issues: Global hard-coded list. Refactor Action: Move to `Config`; database seeding uses it. Order: After constants. New Location: `Config.available_course_keys`.
+   - **SAMPLE_ENROLLMENTS**: Current Issues: Global sample data. Refactor Action: Move to `Config`. Order: With AVAILABLE_COURSE_KEYS. New Location: `Config.sample_enrollments`.
+
+2. **Database Layer (Second: Build data access after config is ready)**
+   - **connect()**: Current Issues: Uses global DB_PATH. Refactor Action: Move to `EnrollmentDatabase` class; accept config as parameter. Order: After config. New Location: `EnrollmentDatabase.__init__` and `connect()`.
+   - **create_tables()**: Current Issues: None major. Refactor Action: Move to `EnrollmentDatabase`; call via instance. Order: After connect. New Location: `EnrollmentDatabase.create_tables()`.
+   - **seed_sample_data()**: Current Issues: Uses global lists. Refactor Action: Move to `EnrollmentDatabase`; accept config for sample data. Order: After create_tables. New Location: `EnrollmentDatabase.seed_sample_data(config)`.
+   - **rows_to_dicts()**: Current Issues: None. Refactor Action: Move to `EnrollmentDatabase` as utility. Order: Early in database. New Location: `EnrollmentDatabase.rows_to_dicts()`.
+   - **get_course_by_key()**: Current Issues: Includes validation (service decision). Refactor Action: Split—pure query in database (no validation), validation in service. Order: After connect. New Location: `EnrollmentDatabase.get_course_by_key_raw(enrollment_key)` (removes validation).
+   - **get_student_course_record()**: Current Issues: Minimal, but parameter checks could be service. Refactor Action: Move pure query to database; remove checks. Order: After connect. New Location: `EnrollmentDatabase.get_student_course_record(user_id, course_id)`.
+   - **get_available_course_keys()**: Current Issues: Mixed (queries and formats). Refactor Action: Split—database returns raw rows, service formats. Order: After connect. New Location: `EnrollmentDatabase.get_all_courses()` (raw query).
+   - **get_student_enrollments()**: Current Issues: Filters by status in query (service logic). Refactor Action: Split—database fetches all enrollments for user, service filters. Order: After connect. New Location: `EnrollmentDatabase.get_student_enrollment_records(user_id)` (raw, no status filter).
+   - **get_student_enrollment_history()**: Current Issues: Similar to above. Refactor Action: Use same split as get_student_enrollments. Order: With get_student_enrollments. New Location: Same as above (raw).
+   - **get_all_enrollment_records()**: Current Issues: Fetches for export (service intent). Refactor Action: Move raw query to database. Order: After connect. New Location: `EnrollmentDatabase.get_all_enrollment_records()`.
+   - **enroll_with_key()**: Current Issues: Direct database call with validation. Refactor Action: Move insert logic to database (pure SQL), validation/orchestration to service. Order: After get_course_by_key_raw. New Location: `EnrollmentDatabase.enroll_or_update_enrollment(user_id, email, course_id, status)`.
+   - **soft_unenroll_student()**: Current Issues: Direct update. Refactor Action: Move to database. Order: After connect. New Location: `EnrollmentDatabase.update_enrollment_status(user_id, course_id, status)`.
+
+3. **Service Layer (Third: Build business logic after database is complete)**
+   - **get_course_by_key() (validation part)**: Current Issues: Was mixed. Refactor Action: Service validates key and calls database. Order: After database get_course_by_key_raw. New Location: `EnrollmentService.get_course_by_key(enrollment_key)` (validates, then calls database).
+   - **get_available_course_keys() (formatting part)**: Current Issues: Was mixed. Refactor Action: Service calls database and formats for dashboard. Order: After database get_all_courses. New Location: `EnrollmentService.get_available_course_keys()` (transforms raw data).
+   - **get_student_enrollments() (filtering part)**: Current Issues: Was mixed. Refactor Action: Service calls database and filters by enrolled status. Order: After database get_student_enrollment_records. New Location: `EnrollmentService.get_student_enrollments(user_id)` (filters for dashboard).
+   - **get_student_enrollment_history() (filtering part)**: Current Issues: Was mixed. Refactor Action: Service calls database (same as enrollments, but no filter). Order: With get_student_enrollments. New Location: `EnrollmentService.get_student_enrollment_history(user_id)` (no filter, all records).
+   - **enroll_with_key() (orchestration part)**: Current Issues: Was mixed. Refactor Action: Service validates inputs, checks course, calls database. Order: After service get_course_by_key and database enroll_or_update. New Location: `EnrollmentService.enroll_with_key(user_id, email, enrollment_key)`.
+   - **soft_unenroll_student()**: Current Issues: Direct call. Refactor Action: Service calls database update. Order: After database update_enrollment_status. New Location: `EnrollmentService.soft_unenroll_student(user_id, course_id)`.
+   - **get_student_summary()**: Current Issues: Aggregates data (business logic). Refactor Action: Service calls history and computes counts. Order: After get_student_enrollment_history. New Location: `EnrollmentService.get_student_summary(user_id)`.
+   - **export_database_snapshot()**: Current Issues: Orchestrates export (service). Refactor Action: Service calls database methods and writes JSON. Order: After all database/service methods. New Location: `EnrollmentService.export_database_snapshot(config)`.
+
+4. **Runner/Test Layer (Last: Update after layers are built)**
+   - **main()**: Current Issues: Reads globals, calls functions directly. Refactor Action: Instantiate classes, inject config/database. Order: After all layers. New Location: Remains top-level, but uses `EnrollmentService` and `EnrollmentDatabase`.
+
+#### Implementation Prompt
+"Refactor the enrollment_starter.py file into an object-oriented, layered design based on the provided plan. Create classes for Config, EnrollmentDatabase, and EnrollmentService. Move constants and sample data to Config. Implement EnrollmentDatabase with pure SQLite methods, injecting config. Build EnrollmentService with business logic, injecting EnrollmentDatabase. Split mixed methods as specified, ensuring database focuses on queries/updates and service handles validation, filtering, and orchestration. Update main() to use the new classes. Preserve all original functionality, but eliminate globals and direct database calls in services. Do not add UI code or change hard-coded sample data beyond encapsulation."
+
+
+What is interesting or useful in the plan?
+Global constants will be moved to their own constants/configs class to make them more configurable across classes. Also, validation and business logic will be removed from database methods, so that the layers can be separated and consistent. The order of classes will be config, database, service, and test/runner. 
+What might be missing or need revision?
+It is unclear whether the methods being separated will be named appropriately to make it clear that they are now two different methods in two different layers. This might be something that needs to be revised.
